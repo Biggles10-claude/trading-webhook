@@ -10,6 +10,10 @@ const fetch = globalThis.fetch || require('node-fetch');
  * @returns {Promise<boolean>} - Success status
  */
 async function sendTelegramMessage(message) {
+  console.log('[Telegram] Checking config...');
+  console.log('[Telegram] Token exists:', !!config.TELEGRAM_BOT_TOKEN);
+  console.log('[Telegram] Chat ID exists:', !!config.TELEGRAM_CHAT_ID);
+
   if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) {
     console.log('[Telegram] Bot token or chat ID not configured, skipping notification');
     return false;
@@ -18,6 +22,7 @@ async function sendTelegramMessage(message) {
   const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`;
 
   try {
+    console.log('[Telegram] Sending message to chat:', config.TELEGRAM_CHAT_ID);
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -26,12 +31,12 @@ async function sendTelegramMessage(message) {
       body: JSON.stringify({
         chat_id: config.TELEGRAM_CHAT_ID,
         text: message,
-        parse_mode: 'Markdown',
         disable_web_page_preview: true
       })
     });
 
     const data = await response.json();
+    console.log('[Telegram] Response:', JSON.stringify(data));
 
     if (data.ok) {
       console.log('[Telegram] Message sent successfully');
@@ -41,7 +46,7 @@ async function sendTelegramMessage(message) {
       return false;
     }
   } catch (error) {
-    console.error('[Telegram] Error sending message:', error.message);
+    console.error('[Telegram] Error sending message:', error.message, error.stack);
     return false;
   }
 }
