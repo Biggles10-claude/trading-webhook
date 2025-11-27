@@ -85,7 +85,9 @@ app.get('/', (req, res) => {
     status: 'ok',
     service: 'trading-webhook',
     timestamp: new Date().toISOString(),
-    telegram_configured: !!(config.TELEGRAM_BOT_TOKEN && config.TELEGRAM_CHAT_ID)
+    telegram_configured: !!(config.TELEGRAM_BOT_TOKEN && config.TELEGRAM_CHAT_ID),
+    token_length: config.TELEGRAM_BOT_TOKEN ? config.TELEGRAM_BOT_TOKEN.length : 0,
+    chat_id_length: config.TELEGRAM_CHAT_ID ? config.TELEGRAM_CHAT_ID.length : 0
   });
 });
 
