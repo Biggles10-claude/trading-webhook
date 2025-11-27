@@ -1,6 +1,8 @@
 // Telegram Bot Integration for Trading Alerts
-const fetch = require('node-fetch');
 const config = require('./config');
+
+// Use native fetch (Node 18+) or fallback to node-fetch
+const fetch = globalThis.fetch || require('node-fetch');
 
 /**
  * Send a message to Telegram
