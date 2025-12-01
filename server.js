@@ -2,7 +2,6 @@
 // Receives alerts and triggers Claude Code trading analysis
 
 const express = require('express');
-const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
@@ -39,44 +38,46 @@ function saveToLog(alertData, analysisResult) {
 }
 
 /**
- * Trigger Claude Code analysis
- * This calls the Claude CLI in headless mode
+ * Relay alert to Telegram bot for Claude analysis
+ * Since Render.com can't run Claude CLI, we send a special message
+ * to the Telegram bot which runs locally with Claude access
  */
-async function triggerClaudeAnalysis(ticker) {
-  return new Promise((resolve, reject) => {
-    const prompt = `Run the tradingview-extract skill on ${ticker} to get latest 100 bars, then run the trading-analysis skill. Output the full setup recommendation including entry, stop loss, take profit levels, and R:R ratio. Format output as JSON with fields: setup (object with type, entry, stop, tp1, tp2, tp3, riskReward, winRate), indicators (object with jewelFast, jewelSlow, mgmMomentum, adx), recommendation (string).`;
+async function relayToTelegramBot(alertData) {
+  // Extract ticker - handle both "SOL" and "SOLUSDT" formats
+  let ticker = alertData.ticker || 'ETH';
+  if (ticker.endsWith('USDT')) {
+    ticker = ticker.replace('USDT', '');
+  }
 
-    // Note: This requires Claude Code CLI to be available in the environment
-    // For Render.com deployment, we'll use a different approach (webhook callback)
-    const command = `claude -p "${prompt}" --output-format json 2>&1`;
+  const condition = alertData.condition || 'ALERT';
+  const price = alertData.price || 'N/A';
+  const alertName = alertData.alert || 'TradingView Alert';
+  const action = alertData.action || 'NOTIFY';
+  const time = alertData.time || new Date().toISOString();
 
-    console.log(`[Claude] Triggering analysis for ${ticker}...`);
+  // Format as a command message that telegram bot will recognize
+  // Bot looks for "AUTO-TRIGGER FROM TRADINGVIEW" and "Ticker:" pattern
+  const analysisCommand = `/analyze ${ticker}`;
 
-    exec(command, { timeout: 300000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`[Claude] Error: ${error.message}`);
-        // Don't reject - return partial result
-        resolve({
-          error: error.message,
-          stdout: stdout,
-          stderr: stderr
-        });
-        return;
-      }
+  // Send the command to Telegram - single clean message
+  const commandSent = await telegram.sendTelegramMessage(
+    `🤖 *AUTO-TRIGGER FROM TRADINGVIEW*\n\n` +
+    `📊 *Alert:* ${alertName}\n` +
+    `💹 *Ticker:* ${ticker}\n` +
+    `💰 *Price:* $${price}\n` +
+    `⚡ *Condition:* ${condition}\n` +
+    `🎯 *Action:* ${action}\n` +
+    `🕐 *Time:* ${time}\n\n` +
+    `_Triggering: ${analysisCommand}_`
+  );
 
-      try {
-        // Try to parse JSON output
-        const result = JSON.parse(stdout);
-        resolve(result);
-      } catch (parseError) {
-        // Return raw output if not JSON
-        resolve({
-          raw: stdout,
-          parseError: parseError.message
-        });
-      }
-    });
-  });
+  if (commandSent) {
+    console.log(`[Relay] Alert relayed to Telegram for ${ticker}`);
+    return { relayed: true, ticker, command: analysisCommand };
+  } else {
+    console.error(`[Relay] Failed to relay alert to Telegram`);
+    return { relayed: false, error: 'Telegram send failed' };
+  }
 }
 
 // Health check endpoint
@@ -120,28 +121,14 @@ app.post('/webhook', async (req, res) => {
 
   // Process in background
   try {
-    // Send initial notification
-    await telegram.sendAlertNotification(alertData, null);
-
-    // Trigger Claude analysis (if Claude CLI is available)
-    const ticker = alertData.ticker || 'ETH';
-    let analysisResult = null;
-
-    try {
-      analysisResult = await triggerClaudeAnalysis(ticker);
-      console.log('[Claude] Analysis complete');
-    } catch (claudeError) {
-      console.error('[Claude] Analysis failed:', claudeError.message);
-      analysisResult = { error: claudeError.message };
-    }
+    // Only send ONE message - the auto-trigger relay
+    // The telegram-claude-bot will detect this and run /analyze automatically
+    const relayResult = await relayToTelegramBot(alertData);
 
     // Save to log
-    const logPath = saveToLog(alertData, analysisResult);
+    const logPath = saveToLog(alertData, relayResult);
 
-    // Send final notification with analysis
-    await telegram.sendAlertNotification(alertData, analysisResult);
-
-    console.log('[Webhook] Processing complete');
+    console.log('[Webhook] Alert relayed, analysis will be triggered by Telegram bot');
   } catch (error) {
     console.error('[Webhook] Processing error:', error.message);
   }
