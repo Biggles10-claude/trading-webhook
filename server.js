@@ -59,8 +59,7 @@ async function relayToTelegramBot(alertData) {
   // Bot looks for "AUTO-TRIGGER FROM TRADINGVIEW" and "Ticker:" pattern
   const analysisCommand = `/analyze ${ticker}`;
 
-  // Send the command to Telegram - single clean message
-  const commandSent = await telegram.sendTelegramMessage(
+  const triggerMessage =
     `🤖 *AUTO-TRIGGER FROM TRADINGVIEW*\n\n` +
     `📊 *Alert:* ${alertName}\n` +
     `💹 *Ticker:* ${ticker}\n` +
@@ -68,8 +67,13 @@ async function relayToTelegramBot(alertData) {
     `⚡ *Condition:* ${condition}\n` +
     `🎯 *Action:* ${action}\n` +
     `🕐 *Time:* ${time}\n\n` +
-    `_Triggering: ${analysisCommand}_`
-  );
+    `_Triggering: ${analysisCommand}_`;
+
+  // Send to trigger channel (for auto-trigger) AND to user chat (for visibility)
+  const channelSent = await telegram.sendToTriggerChannel(triggerMessage);
+  const commandSent = await telegram.sendTelegramMessage(triggerMessage);
+
+  console.log(`[Relay] Channel sent: ${channelSent}, User chat sent: ${commandSent}`);
 
   if (commandSent) {
     console.log(`[Relay] Alert relayed to Telegram for ${ticker}`);

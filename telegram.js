@@ -5,31 +5,28 @@ const config = require('./config');
 const fetch = globalThis.fetch || require('node-fetch');
 
 /**
- * Send a message to Telegram
+ * Send a message to a specific Telegram chat
+ * @param {string} chatId - The chat ID to send to
  * @param {string} message - The message to send (supports Markdown)
  * @returns {Promise<boolean>} - Success status
  */
-async function sendTelegramMessage(message) {
-  console.log('[Telegram] Checking config...');
-  console.log('[Telegram] Token exists:', !!config.TELEGRAM_BOT_TOKEN);
-  console.log('[Telegram] Chat ID exists:', !!config.TELEGRAM_CHAT_ID);
-
-  if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) {
-    console.log('[Telegram] Bot token or chat ID not configured, skipping notification');
+async function sendToChat(chatId, message) {
+  if (!config.TELEGRAM_BOT_TOKEN || !chatId) {
+    console.log('[Telegram] Bot token or chat ID not configured');
     return false;
   }
 
   const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`;
 
   try {
-    console.log('[Telegram] Sending message to chat:', config.TELEGRAM_CHAT_ID);
+    console.log('[Telegram] Sending message to chat:', chatId);
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        chat_id: config.TELEGRAM_CHAT_ID,
+        chat_id: chatId,
         text: message,
         disable_web_page_preview: true
       })
@@ -39,7 +36,7 @@ async function sendTelegramMessage(message) {
     console.log('[Telegram] Response:', JSON.stringify(data));
 
     if (data.ok) {
-      console.log('[Telegram] Message sent successfully');
+      console.log('[Telegram] Message sent successfully to', chatId);
       return true;
     } else {
       console.error('[Telegram] Failed to send message:', data.description);
@@ -49,6 +46,35 @@ async function sendTelegramMessage(message) {
     console.error('[Telegram] Error sending message:', error.message, error.stack);
     return false;
   }
+}
+
+/**
+ * Send a message to Telegram (user's chat)
+ * @param {string} message - The message to send (supports Markdown)
+ * @returns {Promise<boolean>} - Success status
+ */
+async function sendTelegramMessage(message) {
+  console.log('[Telegram] Checking config...');
+  console.log('[Telegram] Token exists:', !!config.TELEGRAM_BOT_TOKEN);
+  console.log('[Telegram] Chat ID exists:', !!config.TELEGRAM_CHAT_ID);
+
+  return sendToChat(config.TELEGRAM_CHAT_ID, message);
+}
+
+/**
+ * Send auto-trigger message to the trigger channel
+ * The telegram-claude-bot listens to this channel and auto-triggers /analyze
+ * @param {string} message - The message to send
+ * @returns {Promise<boolean>} - Success status
+ */
+async function sendToTriggerChannel(message) {
+  if (!config.TRIGGER_CHANNEL_ID) {
+    console.log('[Telegram] Trigger channel not configured, skipping');
+    return false;
+  }
+
+  console.log('[Telegram] Sending to trigger channel:', config.TRIGGER_CHANNEL_ID);
+  return sendToChat(config.TRIGGER_CHANNEL_ID, message);
 }
 
 /**
@@ -112,6 +138,7 @@ async function sendAlertNotification(alertData, analysisResult = null) {
 
 module.exports = {
   sendTelegramMessage,
+  sendToTriggerChannel,
   sendAlertNotification,
   formatAnalysisMessage
 };
