@@ -38,6 +38,35 @@ function saveToLog(alertData, analysisResult) {
 }
 
 /**
+ * Trigger local bot via ngrok tunnel
+ * This calls the HTTP endpoint on telegram-claude-bot to trigger analysis
+ */
+async function triggerLocalBot(ticker) {
+  const triggerUrl = config.LOCAL_BOT_TRIGGER_URL;
+  if (!triggerUrl) {
+    console.log('[Trigger] LOCAL_BOT_TRIGGER_URL not configured, skipping direct trigger');
+    return { triggered: false, reason: 'not_configured' };
+  }
+
+  try {
+    console.log(`[Trigger] Calling local bot at ${triggerUrl}/trigger for ${ticker}`);
+    const response = await fetch(`${triggerUrl}/trigger`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker })
+    });
+
+    const data = await response.json();
+    console.log(`[Trigger] Response:`, JSON.stringify(data));
+
+    return { triggered: response.ok, data };
+  } catch (error) {
+    console.error(`[Trigger] Error calling local bot:`, error.message);
+    return { triggered: false, error: error.message };
+  }
+}
+
+/**
  * Relay alert to Telegram bot for Claude analysis
  * Since Render.com can't run Claude CLI, we send a special message
  * to the Telegram bot which runs locally with Claude access
@@ -56,7 +85,6 @@ async function relayToTelegramBot(alertData) {
   const time = alertData.time || new Date().toISOString();
 
   // Format as a command message that telegram bot will recognize
-  // Bot looks for "AUTO-TRIGGER FROM TRADINGVIEW" and "Ticker:" pattern
   const analysisCommand = `/analyze ${ticker}`;
 
   const triggerMessage =
@@ -69,18 +97,23 @@ async function relayToTelegramBot(alertData) {
     `🕐 *Time:* ${time}\n\n` +
     `_Triggering: ${analysisCommand}_`;
 
-  // Send to trigger channel (for auto-trigger) AND to user chat (for visibility)
-  const channelSent = await telegram.sendToTriggerChannel(triggerMessage);
+  // 1. Try to trigger local bot directly via ngrok
+  const triggerResult = await triggerLocalBot(ticker);
+
+  // 2. Also send notification to user's Telegram (for visibility)
   const commandSent = await telegram.sendTelegramMessage(triggerMessage);
 
-  console.log(`[Relay] Channel sent: ${channelSent}, User chat sent: ${commandSent}`);
+  console.log(`[Relay] Direct trigger: ${triggerResult.triggered}, Telegram notification: ${commandSent}`);
 
-  if (commandSent) {
-    console.log(`[Relay] Alert relayed to Telegram for ${ticker}`);
-    return { relayed: true, ticker, command: analysisCommand };
+  if (triggerResult.triggered) {
+    console.log(`[Relay] Successfully triggered analysis for ${ticker} via ngrok`);
+    return { relayed: true, ticker, method: 'direct', command: analysisCommand };
+  } else if (commandSent) {
+    console.log(`[Relay] Alert sent to Telegram for ${ticker} (manual trigger needed)`);
+    return { relayed: true, ticker, method: 'telegram', command: analysisCommand };
   } else {
-    console.error(`[Relay] Failed to relay alert to Telegram`);
-    return { relayed: false, error: 'Telegram send failed' };
+    console.error(`[Relay] Failed to relay alert`);
+    return { relayed: false, error: 'All methods failed' };
   }
 }
 

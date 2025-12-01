@@ -20,6 +20,10 @@ module.exports = {
   // This is the internal URL where Claude Code is running
   CLAUDE_CONTAINER_URL: process.env.CLAUDE_CONTAINER_URL || 'http://localhost:3001',
 
+  // Local bot trigger URL (ngrok tunnel to telegram-claude-bot)
+  // Set this to your ngrok URL to enable direct triggering
+  LOCAL_BOT_TRIGGER_URL: process.env.LOCAL_BOT_TRIGGER_URL || '',
+
   // Log directory
   LOG_DIR: process.env.LOG_DIR || './logs'
 };
