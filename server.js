@@ -67,53 +67,44 @@ async function triggerLocalBot(ticker) {
 }
 
 /**
- * Relay alert to Telegram bot for Claude analysis
- * Since Render.com can't run Claude CLI, we send a special message
- * to the Telegram bot which runs locally with Claude access
+ * Relay alert to Telegram bot for Claude processing
+ * The alert message field becomes the prompt for Claude
+ * Format: WEBHOOK_PROMPT:<message>
  */
 async function relayToTelegramBot(alertData) {
-  // Extract ticker - handle both "SOL" and "SOLUSDT" formats
-  let ticker = alertData.ticker || 'ETH';
-  if (ticker.endsWith('USDT')) {
-    ticker = ticker.replace('USDT', '');
+  // The "message" field from TradingView alert becomes the Claude prompt
+  // If no message, fall back to a default based on ticker
+  let prompt = alertData.message || alertData.prompt;
+
+  if (!prompt) {
+    // Fallback: construct a basic prompt from alert data
+    let ticker = alertData.ticker || 'SOL';
+    if (ticker.endsWith('USDT')) {
+      ticker = ticker.replace('USDT', '');
+    }
+    prompt = `Run setup-check skill for ${ticker} 30m`;
   }
 
-  const condition = alertData.condition || 'ALERT';
-  const price = alertData.price || 'N/A';
-  const alertName = alertData.alert || 'TradingView Alert';
-  const action = alertData.action || 'NOTIFY';
   const time = alertData.time || new Date().toISOString();
+  const alertName = alertData.alert || 'TradingView Alert';
 
-  // Format as a command message that telegram bot will recognize
-  const analysisCommand = `/analyze ${ticker}`;
-
+  // Format with WEBHOOK_PROMPT marker so bot can detect and process
   const triggerMessage =
-    `🤖 *AUTO-TRIGGER FROM TRADINGVIEW*\n\n` +
-    `📊 *Alert:* ${alertName}\n` +
-    `💹 *Ticker:* ${ticker}\n` +
-    `💰 *Price:* $${price}\n` +
-    `⚡ *Condition:* ${condition}\n` +
-    `🎯 *Action:* ${action}\n` +
-    `🕐 *Time:* ${time}\n\n` +
-    `_Triggering: ${analysisCommand}_`;
+    `WEBHOOK_PROMPT:${prompt}\n\n` +
+    `---\n` +
+    `📊 Alert: ${alertName}\n` +
+    `🕐 Time: ${time}`;
 
-  // 1. Try to trigger local bot directly via ngrok
-  const triggerResult = await triggerLocalBot(ticker);
+  // Send to Telegram - bot will detect WEBHOOK_PROMPT: and process as Claude prompt
+  const sent = await telegram.sendTelegramMessage(triggerMessage);
 
-  // 2. Also send notification to user's Telegram (for visibility)
-  const commandSent = await telegram.sendTelegramMessage(triggerMessage);
+  console.log(`[Relay] Telegram message sent: ${sent}, prompt: "${prompt.substring(0, 50)}..."`);
 
-  console.log(`[Relay] Direct trigger: ${triggerResult.triggered}, Telegram notification: ${commandSent}`);
-
-  if (triggerResult.triggered) {
-    console.log(`[Relay] Successfully triggered analysis for ${ticker} via ngrok`);
-    return { relayed: true, ticker, method: 'direct', command: analysisCommand };
-  } else if (commandSent) {
-    console.log(`[Relay] Alert sent to Telegram for ${ticker} (manual trigger needed)`);
-    return { relayed: true, ticker, method: 'telegram', command: analysisCommand };
+  if (sent) {
+    return { relayed: true, prompt, method: 'telegram' };
   } else {
     console.error(`[Relay] Failed to relay alert`);
-    return { relayed: false, error: 'All methods failed' };
+    return { relayed: false, error: 'Telegram send failed' };
   }
 }
 
