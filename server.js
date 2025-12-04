@@ -67,11 +67,11 @@ async function triggerLocalBot(ticker) {
 }
 
 /**
- * Relay alert to Telegram bot for Claude processing
+ * Relay alert to Claude bot for processing
+ * Uses HTTP trigger if configured (preferred), otherwise Telegram message
  * The alert message field becomes the prompt for Claude
- * Format: WEBHOOK_PROMPT:<message>
  */
-async function relayToTelegramBot(alertData) {
+async function relayToClaudeBot(alertData) {
   // The "message" field from TradingView alert becomes the Claude prompt
   // If no message, fall back to a default based on ticker
   let prompt = alertData.message || alertData.prompt;
@@ -88,23 +88,50 @@ async function relayToTelegramBot(alertData) {
   const time = alertData.time || new Date().toISOString();
   const alertName = alertData.alert || 'TradingView Alert';
 
-  // Format with WEBHOOK_PROMPT marker so bot can detect and process
+  // Try HTTP trigger first (preferred - directly triggers Claude bot)
+  const triggerUrl = config.LOCAL_BOT_TRIGGER_URL;
+  if (triggerUrl) {
+    try {
+      console.log(`[Relay] Calling HTTP trigger at ${triggerUrl}`);
+      const response = await fetch(triggerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, message: prompt })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`[Relay] HTTP trigger success:`, JSON.stringify(data));
+
+        // Also send notification to Telegram (info only, not trigger)
+        const notifyMessage = `🔔 *Webhook Received*\n\n📊 Alert: ${alertName}\n🕐 Time: ${time}\n📝 Prompt: ${prompt.substring(0, 100)}...`;
+        await telegram.sendTelegramMessage(notifyMessage);
+
+        return { relayed: true, prompt, method: 'http_trigger' };
+      } else {
+        console.error(`[Relay] HTTP trigger failed: ${response.status}`);
+      }
+    } catch (error) {
+      console.error(`[Relay] HTTP trigger error:`, error.message);
+    }
+  }
+
+  // Fallback: Send to Telegram with WEBHOOK_PROMPT marker
+  console.log(`[Relay] Falling back to Telegram message`);
   const triggerMessage =
     `WEBHOOK_PROMPT:${prompt}\n\n` +
     `---\n` +
     `📊 Alert: ${alertName}\n` +
     `🕐 Time: ${time}`;
 
-  // Send to Telegram - bot will detect WEBHOOK_PROMPT: and process as Claude prompt
   const sent = await telegram.sendTelegramMessage(triggerMessage);
-
   console.log(`[Relay] Telegram message sent: ${sent}, prompt: "${prompt.substring(0, 50)}..."`);
 
   if (sent) {
     return { relayed: true, prompt, method: 'telegram' };
   } else {
     console.error(`[Relay] Failed to relay alert`);
-    return { relayed: false, error: 'Telegram send failed' };
+    return { relayed: false, error: 'Both HTTP trigger and Telegram failed' };
   }
 }
 
@@ -149,9 +176,8 @@ app.post('/webhook', async (req, res) => {
 
   // Process in background
   try {
-    // Only send ONE message - the auto-trigger relay
-    // The telegram-claude-bot will detect this and run /analyze automatically
-    const relayResult = await relayToTelegramBot(alertData);
+    // Relay to Claude bot (HTTP trigger preferred, Telegram fallback)
+    const relayResult = await relayToClaudeBot(alertData);
 
     // Save to log
     const logPath = saveToLog(alertData, relayResult);
